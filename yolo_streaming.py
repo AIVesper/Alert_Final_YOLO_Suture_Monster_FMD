@@ -34,6 +34,7 @@ configPath = os.path.sep.join([args["yolo"], "yolo.cfg"])
 # load our YOLO object detector trained on COCO dataset (80 classes)
 print("[INFO] loading YOLO from disk...")
 net = cv2.dnn.readNetFromDarknet(configPath, weightsPath)
+next_frame_towait=5 #for sms
 fps = FPS().start()
 while(True):
     # Capture frame-by-frame
@@ -120,11 +121,16 @@ while(True):
     if ratio>=0.1 and nomask_count>=3:
         text = "Danger !"
         cv2.putText(frame,text, (W-100, int(border_size-50)), cv2.FONT_HERSHEY_SIMPLEX,0.65,[26,13,247], 2)
-
+        if fps._numFrames>=next_frame_towait: #to send danger sms again,only after skipping few seconds
+            print('Sms sent')
+            next_frame_towait=fps._numFrames+(5*25)
         
     elif ratio!=0 and np.isnan(ratio)!=True:
         text = "Warning !"
         cv2.putText(frame,text, (W-100, int(border_size-50)), cv2.FONT_HERSHEY_SIMPLEX,0.65,[0,255,255], 2)
+        if fps._numFrames>=next_frame_towait: #to send danger sms again,only after skipping few seconds
+            print('SB bot!!!!!')
+            next_frame_towait=fps._numFrames+(5*25)
 
     else:
         text = "Safe "
@@ -153,3 +159,5 @@ fps.stop()
 # When everything done, release the capture
 cap.release()
 cv2.destroyAllWindows()
+print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
