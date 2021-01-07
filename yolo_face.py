@@ -3,21 +3,20 @@ import numpy as np
 import cv2.cv2 as cv2
 from imutils.video import FPS
 import argparse
+import datetime
 import time
+import uuid
 import pyimgur
-
+from store_image import storeImage
 from linebot import LineBotApi
+from bigdataProxy import injectNotificationDataSet
 from linebot.exceptions import LineBotApiError
 from linebot.models import TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction, MessageAction,URIAction
 
 # use index 1 for mac camera
-CLIENT_ID = "9a1eb3a795e1769"
 cap = cv2.VideoCapture(0)
 line_bot_api = LineBotApi(
     "Km9P5RE6SlCa+BXIfzbrZWJRCw/ITBvHIirRrFQohlTUlyDNllG/iFCZMvDySJKXSjOc29JKRcMT7m3ViMKILBeEy95RTlfkEhbijaIv9HgFXXJcD14GE0Q3C332UW2BRk1cV6u+y1Pr6L1l0AFLQQdB04t89/1O/w1cDnyilFU=")
-alertMessage = TemplateSendMessage(
-    alt_text='收到警訊，請盡速查看！',
-)
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-y", "--yolo", required=True,
@@ -45,15 +44,14 @@ print("[INFO] loading YOLO from disk...")
 net = cv2.dnn.readNetFromDarknet(configPath, weightsPath)
 next_frame_towait = 5  # for sms
 fps = FPS().start()
-
+frameId=0
 while(True):
     # Capture frame-by-frame
     ret, frame = cap.read()
-
     # DETECTION WITH YOLO
     # load our input image and grab its spatial dimensions
     (H, W) = frame.shape[:2]
-
+    frameId+=1
     # determine only the *output* layer names that we need from YOLO
     ln = net.getLayerNames()
     ln = [ln[i[0] - 1] for i in net.getUnconnectedOutLayers()]
@@ -129,25 +127,25 @@ while(True):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, border_text_color, 2)
     ratio = nomask_count/(mask_count+nomask_count+0.000001)
 
-    if ratio >= 0.1 and nomask_count >= 3:
-        text = "Danger !"
-        cv2.putText(frame, text, (W-100, int(border_size-50)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, [26, 13, 247], 2)
-        if fps._numFrames >= next_frame_towait:  # to send danger sms again,only after skipping few seconds
-            print('Sms sent')
-            next_frame_towait = fps._numFrames+(5*25)
+    # if ratio >= 0.1 and nomask_count >= 3:
+    #     text = "Danger !"
+    #     cv2.putText(frame, text, (W-100, int(border_size-50)),
+    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, [26, 13, 247], 2)
+    #     if fps._numFrames >= next_frame_towait:  # to send danger sms again,only after skipping few seconds
+    #         print('Sms sent')
+    #         next_frame_towait = fps._numFrames+(5*25)
 
-    elif ratio != 0 and np.isnan(ratio) != True:
+    if ratio != 0 and np.isnan(ratio) != True:
         text = "Warning !"
         cv2.putText(frame, text, (W-100, int(border_size-50)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, [0, 255, 255], 2)
         if fps._numFrames >= next_frame_towait:
-            cv2.imwrite("frame.jpg", frame)
-            im = pyimgur.Imgur(CLIENT_ID)
-            uploaded_image = im.upload_image("frame.jpg", title="face mask")
-            line_bot_api.multicast(['Uc24e58dfda24ad2591c83b870ec2611c', 'Ue1d5af8b8fba08c330817068a28601d1', 'Ubbf393c10d9b0d15fcf692f899e014f6'], TemplateSendMessage(alt_text='Warning msg!', template=ButtonsTemplate(
-                title='警示預警', thumbnail_image_url=str(uploaded_image.link), text="有 "+str(nomask_count)+" 個人沒戴口罩", actions=[URIAction(label='統計報表', uri='https://line.me')])))
-            next_frame_towait = fps._numFrames+(5*25)
+            sb_time=datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            sb_url=str(storeImage(frame,str(uuid.uuid1())))
+            line_bot_api.broadcast(TemplateSendMessage(alt_text='收到警訊，請盡速查看！', template=ButtonsTemplate(
+                title='場域：藝術館入口', thumbnail_image_url=sb_url, text="該場域內有 "+str(nomask_count)+" 個人沒戴口罩\n"+"偵測時間："+str(sb_time), actions=[URIAction(label='統計報表', uri='https://datastudio.google.com/reporting/0420b197-cbec-4bbe-84e6-29f95dd1fe08')])))
+            injectNotificationDataSet('藝術館入口',sb_url,str(sb_time))
+            next_frame_towait = fps._numFrames+(5*10)
 
     else:
         text = "Safe "
