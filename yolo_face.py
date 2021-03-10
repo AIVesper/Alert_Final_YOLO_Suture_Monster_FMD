@@ -6,17 +6,29 @@ import argparse
 import datetime
 import time
 import uuid
+import random
 import pyimgur
 from store_image import storeImage
 from linebot import LineBotApi
+from fire import getName, getDevice, getLink, getAll
 from bigdataProxy import injectNotificationDataSet
 from linebot.exceptions import LineBotApiError
-from linebot.models import TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction, MessageAction,URIAction
-
+from linebot.models import TextSendMessage, TemplateSendMessage, ButtonsTemplate, URITemplateAction, MessageAction, URIAction
+from camera.app import getHost
+#from pyngrok import ngrok
+#http_tunnel = ngrok.connect(5051)
 # use index 1 for mac camera
-cap = cv2.VideoCapture(0)
+if(getLink() == '0'):
+    cap = cv2.VideoCapture(0)
+else:
+    cap = cv2.VideoCapture(getLink())
+width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+out = cv2.VideoWriter('output.avi', fourcc, 20.0, (width, height))
+# print(getDevice())
 line_bot_api = LineBotApi(
-    "Km9P5RE6SlCa+BXIfzbrZWJRCw/ITBvHIirRrFQohlTUlyDNllG/iFCZMvDySJKXSjOc29JKRcMT7m3ViMKILBeEy95RTlfkEhbijaIv9HgFXXJcD14GE0Q3C332UW2BRk1cV6u+y1Pr6L1l0AFLQQdB04t89/1O/w1cDnyilFU=")
+    "5OjwvGGPi4zutObUFkeeOQ5Cf712R7cwPFinDqyNbMFrWi4zTOF4/QXAbM1Vj/Be5LriCleS8HQmjABnGrKWb1WocThH1l6Q5QyQySDQss57hkE5sS76x2hdEKfqOWcW7+PEp5WD/yHXurbCa2fR0gdB04t89/1O/w1cDnyilFU=")
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-y", "--yolo", required=True,
@@ -44,14 +56,14 @@ print("[INFO] loading YOLO from disk...")
 net = cv2.dnn.readNetFromDarknet(configPath, weightsPath)
 next_frame_towait = 5  # for sms
 fps = FPS().start()
-frameId=0
+frameId = 0
 while(True):
     # Capture frame-by-frame
     ret, frame = cap.read()
     # DETECTION WITH YOLO
     # load our input image and grab its spatial dimensions
     (H, W) = frame.shape[:2]
-    frameId+=1
+    frameId += 1
     # determine only the *output* layer names that we need from YOLO
     ln = net.getLayerNames()
     ln = [ln[i[0] - 1] for i in net.getUnconnectedOutLayers()]
@@ -67,7 +79,6 @@ while(True):
     end = time.time()
 
     # show timing information on YOLO
-    print("[INFO] YOLO took {:.6f} seconds".format(end - start))
 
     # initialize our lists of detected bounding boxes, confidences, and
     # class IDs, respectively
@@ -112,48 +123,25 @@ while(True):
                             args["threshold"])
     border_size = 100
     border_text_color = [255, 255, 255]
-    frame = cv2.copyMakeBorder(
-        frame, border_size, 0, 0, 0, cv2.BORDER_CONSTANT)
+
     filtered_classids = np.take(classIDs, idxs)
     mask_count = (filtered_classids == 0).sum()
     nomask_count = (filtered_classids == 1).sum()
     # display count
-    text = "NoMaskCount: {}  MaskCount: {}".format(nomask_count, mask_count)
-    cv2.putText(frame, text, (0, int(border_size-50)),
+    text = "NoMaskCount: {}".format(nomask_count)
+    cv2.putText(frame, text, (W-170, 100),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, border_text_color, 2)
+    text = "MaskCount: {}".format(mask_count)
+    cv2.putText(frame, text, (W-170, 125),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, border_text_color, 2)
+    text = "AllCount: {}".format(mask_count+nomask_count)
+    cv2.putText(frame, text, (W-170, 150),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, border_text_color, 2)
     # display status
-    text = "Status:"
-    cv2.putText(frame, text, (W-200, int(border_size-50)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.65, border_text_color, 2)
     ratio = nomask_count/(mask_count+nomask_count+0.000001)
-
-    # if ratio >= 0.1 and nomask_count >= 3:
-    #     text = "Danger !"
-    #     cv2.putText(frame, text, (W-100, int(border_size-50)),
-    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, [26, 13, 247], 2)
-    #     if fps._numFrames >= next_frame_towait:  # to send danger sms again,only after skipping few seconds
-    #         print('Sms sent')
-    #         next_frame_towait = fps._numFrames+(5*25)
-
-    if ratio != 0 and np.isnan(ratio) != True:
-        text = "Warning !"
-        cv2.putText(frame, text, (W-100, int(border_size-50)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, [0, 255, 255], 2)
-        if fps._numFrames >= next_frame_towait:
-            sb_time=datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            sb_url=str(storeImage(frame,str(uuid.uuid1())))
-            line_bot_api.broadcast(TemplateSendMessage(alt_text='收到警訊，請盡速查看！', template=ButtonsTemplate(
-                title='場域：藝術館入口', thumbnail_image_url=sb_url, text="該場域內有 "+str(nomask_count)+" 個人沒戴口罩\n"+"偵測時間："+str(sb_time), actions=[URIAction(label='統計報表', uri='https://datastudio.google.com/reporting/0420b197-cbec-4bbe-84e6-29f95dd1fe08')])))
-            injectNotificationDataSet('藝術館入口',sb_url,str(sb_time))
-            next_frame_towait = fps._numFrames+(5*10)
-
-    else:
-        text = "Safe "
-        cv2.putText(frame, text, (W-100, int(border_size-50)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, [0, 255, 0], 2)
-    # ensure at least one detection exists
+    out.write(frame)
     if len(idxs) > 0:
-        # loop over the indexes we are keeping
+    # loop over the indexes we are keeping
         for i in idxs.flatten():
             # extract the bounding box coordinates
             (x, y) = (boxes[i][0], boxes[i][1])
@@ -165,6 +153,41 @@ while(True):
             text = "{}: {:.4f}".format(LABELS[classIDs[i]], confidences[i])
             cv2.putText(frame, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
                         0.5, color, 2)
+    if ratio != 0 and np.isnan(ratio) != True:
+        text = "Warning !"
+        cv2.putText(frame, text, (W-170, int(border_size-50)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, [13, 23, 227], 2)
+        if fps._numFrames >= next_frame_towait:
+            print("[INFO] YOLOV3 took {:.6f} seconds to capture the person without the mask.".format(
+                end - start))
+            all_info = getAll()
+            sb_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            sb_url = str(storeImage(frame, str(uuid.uuid5(
+                uuid.NAMESPACE_DNS, str(uuid.uuid1()) + str(random.random())))))
+            total_count = int(nomask_count)+int(mask_count)
+            if(getLink() == '0'):
+                line_bot_api.broadcast(TemplateSendMessage(alt_text='偵測到有人未帶口罩，請盡速查看！', template=ButtonsTemplate(title='場域：'+str(getName()), thumbnail_image_url=sb_url, text="場域內總人數："+str(total_count)+"\n警示事件：有 "+str(
+                    nomask_count)+" 人沒戴口罩\n"+"擷取時間："+str(sb_time), actions=[URIAction(label='統計報表', uri='https://datastudio.google.com/u/5/reporting/0420b197-cbec-4bbe-84e6-29f95dd1fe08/page/9qmvB')])))
+                line_bot_api.broadcast(TextSendMessage(
+                    text="辨識裝置："+str(all_info['device'])+"\n辨識時間：{:.6f} seconds".format(end - start)+"\n串流鏈接：http://"+str(getHost())+":5051/video"))
+                injectNotificationDataSet(str(all_info['device']), sb_url, str(sb_time), str(all_info['area']), str(
+                    all_info['stream_link']), str(nomask_count), str(int(nomask_count)+int(mask_count)))
+            else:
+                line_bot_api.broadcast(TemplateSendMessage(alt_text='偵測到有人未帶口罩，請盡速查看！', template=ButtonsTemplate(title='場域：'+str(getName()), thumbnail_image_url=sb_url, text="場域內總人數："+str(total_count)+"\n警示事件：有 "+str(
+                    nomask_count)+" 人沒戴口罩\n"+"擷取時間："+str(sb_time), actions=[URIAction(label='統計報表', uri='https://datastudio.google.com/u/5/reporting/0420b197-cbec-4bbe-84e6-29f95dd1fe08/page/9qmvB')])))
+                line_bot_api.broadcast(TextSendMessage(text="辨識裝置："+str(all_info['device'])+"\n辨識時間：{:.6f} seconds".format(
+                    end - start)+"\n串流鏈接：http://"+getLink()))
+                injectNotificationDataSet(str(all_info['device']), sb_url, str(sb_time), str(all_info['area']), str(
+                    all_info['stream_link']), str(nomask_count), str(int(nomask_count)+int(mask_count)))
+
+            next_frame_towait = fps._numFrames+(5*15)
+
+    else:
+        text = "Safe "
+        cv2.putText(frame, text, (W-100, int(border_size-50)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, [0, 255, 0], 2)
+
+
 
     # Display the resulting frame
     cv2.imshow('frame', frame)
@@ -174,6 +197,7 @@ while(True):
 fps.stop()
 # When everything done, release the capture
 cap.release()
+out.release()
 cv2.destroyAllWindows()
 print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
 print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
